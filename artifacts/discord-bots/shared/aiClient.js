@@ -9,14 +9,15 @@ const client = new OpenAI({
 const MODEL = process.env.AI_MODEL || 'gemini-2.0-flash';
 
 /**
- * Send a chat completion request to Gemini (OpenAI-compatible format).
+ * Send a chat completion request to Gemini with automatic retry on 429s.
  * @param {Object} opts
  * @param {string} opts.system     - system prompt (persona / instructions)
  * @param {Array}  opts.messages   - [{role:'user'|'assistant', content:string}]
  * @param {Array}  [opts.tools]    - optional tool definitions (Anthropic input_schema shape)
  * @param {number} [opts.maxTokens]
+ * @param {number} [opts._attempt] - internal retry counter
  */
-async function chat({ system, messages, tools, maxTokens = 500 }) {
+async function chat({ system, messages, tools, maxTokens = 500, _attempt = 0 }) {
   const systemMsg = system ? [{ role: 'system', content: system }] : [];
 
   const params = {
@@ -37,7 +38,18 @@ async function chat({ system, messages, tools, maxTokens = 500 }) {
     }));
   }
 
-  return client.chat.completions.create(params);
+  try {
+    return await client.chat.completions.create(params);
+  } catch (err) {
+    // Retry on rate limit (429) up to 4 times with exponential backoff
+    if (err.status === 429 && _attempt < 4) {
+      const delay = Math.pow(2, _attempt) * 2000; // 2s, 4s, 8s, 16s
+      console.log(`[aiClient] Rate limited — retrying in ${delay / 1000}s (attempt ${_attempt + 1}/4)`);
+      await new Promise((r) => setTimeout(r, delay));
+      return chat({ system, messages, tools, maxTokens, _attempt: _attempt + 1 });
+    }
+    throw err;
+  }
 }
 
 /** Pull the text content out of an OpenAI-compatible response */
