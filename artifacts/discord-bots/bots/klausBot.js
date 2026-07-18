@@ -110,6 +110,13 @@ client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot) return;
     if (!client.user || !message.mentions.has(client.user)) return;
 
+    // Quick ID lookup — bypass AI entirely
+    const rawText = message.content.replace(/<@!?\d+>/g, '').trim().toLowerCase();
+    if (rawText.includes('my id') || rawText.includes('what is my discord id') || rawText.includes('what\'s my id')) {
+      await message.reply(`Your Discord user ID is: \`${message.author.id}\``);
+      return;
+    }
+
     await message.channel.sendTyping();
 
     const memKey = `klaus:${message.channelId}`;
