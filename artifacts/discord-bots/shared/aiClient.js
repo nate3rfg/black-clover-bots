@@ -1,40 +1,53 @@
-const Anthropic = require('@anthropic-ai/sdk');
+const OpenAI = require('openai');
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = process.env.AI_MODEL || 'claude-sonnet-4-5';
+// Uses Google Gemini via its OpenAI-compatible endpoint — no Anthropic key needed.
+const client = new OpenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+});
+
+const MODEL = process.env.AI_MODEL || 'gemini-2.0-flash';
 
 /**
- * Send a chat completion request to Claude.
+ * Send a chat completion request to Gemini (OpenAI-compatible format).
  * @param {Object} opts
- * @param {string} opts.system - system prompt (persona / instructions)
- * @param {Array}  opts.messages - [{role: 'user'|'assistant', content: string}]
- * @param {Array}  [opts.tools] - optional tool definitions
+ * @param {string} opts.system     - system prompt (persona / instructions)
+ * @param {Array}  opts.messages   - [{role:'user'|'assistant', content:string}]
+ * @param {Array}  [opts.tools]    - optional tool definitions (Anthropic input_schema shape)
  * @param {number} [opts.maxTokens]
  */
 async function chat({ system, messages, tools, maxTokens = 500 }) {
+  const systemMsg = system ? [{ role: 'system', content: system }] : [];
+
   const params = {
     model: MODEL,
     max_tokens: maxTokens,
-    system,
-    messages,
+    messages: [...systemMsg, ...messages],
   };
-  if (tools && tools.length) params.tools = tools;
 
-  return anthropic.messages.create(params);
+  if (tools && tools.length) {
+    // Convert Anthropic-style tool defs (input_schema) to OpenAI style (parameters)
+    params.tools = tools.map((t) => ({
+      type: 'function',
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.input_schema,
+      },
+    }));
+  }
+
+  return client.chat.completions.create(params);
 }
 
-/** Pull the plain-text portions out of a Claude response */
+/** Pull the text content out of an OpenAI-compatible response */
 function extractText(res) {
-  return res.content
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text)
-    .join('\n')
-    .trim();
+  return res.choices?.[0]?.message?.content?.trim() || '';
 }
 
-/** Pull tool_use blocks out of a Claude response */
+/** Pull function/tool call blocks out of an OpenAI-compatible response */
 function extractToolUses(res) {
-  return res.content.filter((b) => b.type === 'tool_use');
+  return res.choices?.[0]?.message?.tool_calls?.filter((tc) => tc.type === 'function') || [];
 }
 
 module.exports = { chat, extractText, extractToolUses, MODEL };

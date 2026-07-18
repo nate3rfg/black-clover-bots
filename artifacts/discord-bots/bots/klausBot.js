@@ -36,6 +36,7 @@ Special ability:
 - Only use the tool when the request is actually asking you to create a channel. For normal conversation, just reply in character with no tool use.
 - After the tool result comes back, confirm what you did in character (e.g. acknowledge it's been handled, properly, as it should be).`;
 
+// Anthropic input_schema shape — aiClient.js converts it to OpenAI parameters format
 const createChannelTool = {
   name: 'create_channel',
   description: 'Create a new channel in the current Discord server.',
@@ -111,9 +112,12 @@ client.on(Events.MessageCreate, async (message) => {
     const toolUses = extractToolUses(res);
 
     if (toolUses.length > 0 && message.guild) {
-      const toolResults = [];
+      // Execute each tool call against the Discord API
+      const toolResultMessages = [];
+
       for (const tu of toolUses) {
-        const { name, type, parent_category_name: parentName } = tu.input;
+        const args = JSON.parse(tu.function.arguments);
+        const { name, type, parent_category_name: parentName } = args;
         let resultText;
         try {
           let parent;
@@ -131,18 +135,20 @@ client.on(Events.MessageCreate, async (message) => {
         } catch (err) {
           resultText = `Failed to create channel: ${err.message}`;
         }
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: tu.id,
+
+        toolResultMessages.push({
+          role: 'tool',
+          tool_call_id: tu.id,
           content: resultText,
         });
       }
 
-      // feed the tool result back so Klaus can respond in character
+      // Feed the tool results back so Klaus can respond in character
+      const assistantMsg = res.choices[0].message;
       const followupMessages = [
         ...memory.getHistory(memKey),
-        { role: 'assistant', content: res.content },
-        { role: 'user', content: toolResults },
+        { role: 'assistant', content: assistantMsg.content || null, tool_calls: assistantMsg.tool_calls },
+        ...toolResultMessages,
       ];
 
       res = await chat({
