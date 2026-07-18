@@ -15,6 +15,7 @@ const memory = require('../shared/memoryStore');
 const NAME = 'Klaus';
 const TOKEN = process.env.KLAUS_BOT_TOKEN;
 const CLIENT_ID = process.env.KLAUS_CLIENT_ID;
+const OWNER_ID = process.env.OWNER_ID; // Only this user can trigger powerful tools
 
 const persona = `You are role-playing as Klaus Lunettes, a character from Black Clover, chatting in a Discord server.
 
@@ -125,12 +126,15 @@ client.on(Events.MessageCreate, async (message) => {
       return match;
     }).trim();
 
+    const isOwner = message.author.id === OWNER_ID;
+
     memory.addTurn(memKey, 'user', `${message.member?.displayName || message.author.username}: ${message.content}`);
 
+    // Only the owner gets access to powerful tools (channel creation, nickname changes)
     let res = await chat({
       system: persona,
       messages: memory.getHistory(memKey),
-      tools,
+      tools: isOwner ? tools : undefined,
       maxTokens: 400,
     });
 
