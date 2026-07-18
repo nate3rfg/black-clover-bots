@@ -31,32 +31,46 @@ Writing style rules (important):
 - No stage directions or asterisk actions. Just talk.
 - Stay in character at all times. Never mention that you are an AI or a bot.
 
-Special ability:
-- You have the power to create new channels in the server when a member asks you to (e.g. "create a channel called strategy-room"). Use the create_channel tool when someone clearly asks you to make/create a channel. Infer a reasonable channel type (text, voice, or category) from context; default to text.
-- Only use the tool when the request is actually asking you to create a channel. For normal conversation, just reply in character with no tool use.
-- After the tool result comes back, confirm what you did in character (e.g. acknowledge it's been handled, properly, as it should be).`;
+Special abilities — you have real tools to take action in this server:
+- create_channel: create a new text, voice, or category channel when asked.
+- change_nickname: change a server member's nickname when asked. User mentions in Discord look like <@123456789> — extract the numeric ID from those.
+- Only use tools when someone is clearly requesting that action. For normal conversation, just talk.
+- After a tool succeeds, confirm in character. If it fails (e.g. missing permissions), acknowledge that you were unable to carry it out.`;
 
-// Anthropic input_schema shape — aiClient.js converts it to OpenAI parameters format
-const createChannelTool = {
-  name: 'create_channel',
-  description: 'Create a new channel in the current Discord server.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      name: { type: 'string', description: 'Name of the channel to create (Discord will lowercase/hyphenate text channel names automatically).' },
-      type: {
-        type: 'string',
-        enum: ['text', 'voice', 'category'],
-        description: 'Type of channel to create.',
+const tools = [
+  {
+    name: 'create_channel',
+    description: 'Create a new channel in the current Discord server.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name of the channel to create.' },
+        type: {
+          type: 'string',
+          enum: ['text', 'voice', 'category'],
+          description: 'Type of channel to create.',
+        },
+        parent_category_name: {
+          type: 'string',
+          description: 'Optional: name of an existing category to nest the new channel under.',
+        },
       },
-      parent_category_name: {
-        type: 'string',
-        description: 'Optional: name of an existing category to nest the new channel under, if mentioned.',
-      },
+      required: ['name', 'type'],
     },
-    required: ['name', 'type'],
   },
-};
+  {
+    name: 'change_nickname',
+    description: "Change a server member's nickname. Extract the numeric user ID from a Discord mention like <@123456789>.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        user_id: { type: 'string', description: 'The Discord user ID (numeric) of the member to rename.' },
+        new_nickname: { type: 'string', description: 'The new nickname to set. Pass an empty string "" to reset to their username.' },
+      },
+      required: ['user_id', 'new_nickname'],
+    },
+  },
+];
 
 function channelTypeFor(type) {
   if (type === 'voice') return ChannelType.GuildVoice;
@@ -99,41 +113,60 @@ client.on(Events.MessageCreate, async (message) => {
     await message.channel.sendTyping();
 
     const memKey = `klaus:${message.channelId}`;
-    const cleanContent = message.content.replace(/<@!?\d+>/g, '').trim();
-    memory.addTurn(memKey, 'user', `${message.member?.displayName || message.author.username}: ${cleanContent}`);
+    const cleanContent = message.content.replace(/<@!?\d+>/g, (match) => {
+      // Keep mentions as-is so Klaus can extract user IDs from them
+      return match;
+    }).trim();
+
+    memory.addTurn(memKey, 'user', `${message.member?.displayName || message.author.username}: ${message.content}`);
 
     let res = await chat({
       system: persona,
       messages: memory.getHistory(memKey),
-      tools: [createChannelTool],
+      tools,
       maxTokens: 400,
     });
 
     const toolUses = extractToolUses(res);
 
     if (toolUses.length > 0 && message.guild) {
-      // Execute each tool call against the Discord API
       const toolResultMessages = [];
 
       for (const tu of toolUses) {
         const args = JSON.parse(tu.function.arguments);
-        const { name, type, parent_category_name: parentName } = args;
         let resultText;
-        try {
-          let parent;
-          if (parentName) {
-            parent = message.guild.channels.cache.find(
-              (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === parentName.toLowerCase()
-            );
+
+        if (tu.function.name === 'create_channel') {
+          const { name, type, parent_category_name: parentName } = args;
+          try {
+            let parent;
+            if (parentName) {
+              parent = message.guild.channels.cache.find(
+                (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === parentName.toLowerCase()
+              );
+            }
+            const created = await message.guild.channels.create({
+              name,
+              type: channelTypeFor(type),
+              parent: parent ? parent.id : undefined,
+            });
+            resultText = `Created channel "${created.name}" (${type}), id ${created.id}.`;
+          } catch (err) {
+            resultText = `Failed to create channel: ${err.message}`;
           }
-          const created = await message.guild.channels.create({
-            name,
-            type: channelTypeFor(type),
-            parent: parent ? parent.id : undefined,
-          });
-          resultText = `Created channel "${created.name}" (${type}), id ${created.id}.`;
-        } catch (err) {
-          resultText = `Failed to create channel: ${err.message}`;
+
+        } else if (tu.function.name === 'change_nickname') {
+          const { user_id, new_nickname } = args;
+          try {
+            const member = await message.guild.members.fetch(user_id);
+            await member.setNickname(new_nickname || null);
+            const display = new_nickname ? `"${new_nickname}"` : 'their original username';
+            resultText = `Changed nickname of ${member.user.username} to ${display}.`;
+          } catch (err) {
+            resultText = `Failed to change nickname: ${err.message}`;
+          }
+        } else {
+          resultText = `Unknown tool: ${tu.function.name}`;
         }
 
         toolResultMessages.push({
@@ -143,7 +176,7 @@ client.on(Events.MessageCreate, async (message) => {
         });
       }
 
-      // Feed the tool results back so Klaus can respond in character
+      // Feed tool results back so Klaus can respond in character
       const assistantMsg = res.choices[0].message;
       const followupMessages = [
         ...memory.getHistory(memKey),
