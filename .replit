@@ -11,6 +11,26 @@ env = { "CI" = "true" }
 [workflows]
 runButton = "Project"
 
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Discord Bots"
+
+[[workflows.workflow]]
+name = "Discord Bots"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/discord-bots run start"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true
@@ -18,3 +38,12 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[userenv]
+
+[userenv.shared]
+ASTA_CHANNEL_ID = "1527070489237917756"
+GUILD_ID = "1526822886994608170"
+NERO_CHANNEL_ID = "1527870731772231720"
+NOELLE_CHANNEL_ID = "1527334186627633215"
+ZORA_CHANNEL_ID = "1527123920640278548"
