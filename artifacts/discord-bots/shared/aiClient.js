@@ -1,15 +1,15 @@
 const OpenAI = require('openai');
 
-// Uses Google Gemini via its OpenAI-compatible endpoint — no Anthropic key needed.
+// Groq — free tier, high rate limits, OpenAI-compatible API
 const client = new OpenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: 'https://api.groq.com/openai/v1',
 });
 
-const MODEL = process.env.AI_MODEL || 'gemini-2.0-flash';
+const MODEL = process.env.AI_MODEL || 'llama-3.3-70b-versatile';
 
 /**
- * Send a chat completion request to Gemini with automatic retry on 429s.
+ * Send a chat completion request to Groq.
  * @param {Object} opts
  * @param {string} opts.system     - system prompt (persona / instructions)
  * @param {Array}  opts.messages   - [{role:'user'|'assistant', content:string}]
@@ -36,15 +36,16 @@ async function chat({ system, messages, tools, maxTokens = 500, _attempt = 0 }) 
         parameters: t.input_schema,
       },
     }));
+    params.tool_choice = 'auto';
   }
 
   try {
     return await client.chat.completions.create(params);
   } catch (err) {
-    // Retry on rate limit (429) up to 4 times with exponential backoff
-    if (err.status === 429 && _attempt < 4) {
-      const delay = Math.pow(2, _attempt) * 2000; // 2s, 4s, 8s, 16s
-      console.log(`[aiClient] Rate limited — retrying in ${delay / 1000}s (attempt ${_attempt + 1}/4)`);
+    // Retry on rate limit (429) up to 3 times with backoff
+    if (err.status === 429 && _attempt < 3) {
+      const delay = (err.headers?.['retry-after'] * 1000) || Math.pow(2, _attempt) * 1500;
+      console.log(`[aiClient] Rate limited — retrying in ${Math.round(delay / 1000)}s (attempt ${_attempt + 1}/3)`);
       await new Promise((r) => setTimeout(r, delay));
       return chat({ system, messages, tools, maxTokens, _attempt: _attempt + 1 });
     }
