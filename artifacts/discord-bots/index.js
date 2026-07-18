@@ -1,4 +1,5 @@
 require('dotenv').config();
+const http = require('http');
 
 const bots = [
   { name: 'RoastBattle', mod: require('./bots/roastBattleBot') },
@@ -8,6 +9,13 @@ const bots = [
   { name: 'Klaus', mod: require('./bots/klausBot') },
   { name: 'Nero', mod: require('./bots/neroBot') },
 ];
+
+// Tiny health-check server so Render/UptimeRobot can keep the process alive
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('Bots online');
+}).listen(PORT, () => console.log(`[health] listening on port ${PORT}`));
 
 async function main() {
   for (const { name, mod } of bots) {
