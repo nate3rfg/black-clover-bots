@@ -6,7 +6,7 @@ const client = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
-const MODEL = process.env.AI_MODEL || 'llama-3.3-70b-versatile';
+const MODEL = process.env.AI_MODEL || 'llama-3.1-8b-instant';
 
 /**
  * Send a chat completion request to Groq.
@@ -44,7 +44,8 @@ async function chat({ system, messages, tools, maxTokens = 500, _attempt = 0 }) 
   } catch (err) {
     // Retry on rate limit (429) up to 3 times with backoff
     if (err.status === 429 && _attempt < 3) {
-      const delay = (err.headers?.['retry-after'] * 1000) || Math.pow(2, _attempt) * 1500;
+      const retryAfter = parseFloat(err.headers?.['retry-after'] || 0);
+      const delay = Math.min((retryAfter * 1000) || Math.pow(2, _attempt) * 1500, 8000);
       console.log(`[aiClient] Rate limited — retrying in ${Math.round(delay / 1000)}s (attempt ${_attempt + 1}/3)`);
       await new Promise((r) => setTimeout(r, delay));
       return chat({ system, messages, tools, maxTokens, _attempt: _attempt + 1 });
